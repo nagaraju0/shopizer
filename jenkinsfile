@@ -1,89 +1,74 @@
-pipeline {
-    agent { label 'jdk11-mvn3.8.4' }
-    triggers {
-        upstream(upstreamProjects: 'freestyle', threshold: hudson.model.Result.SUCCESS)
-        cron('30 */2 * * 0,6') 
-        pollSCM('45 23 * * 0,6')
-    }
-     parameters {
-         choice(name: 'BRANCH_TO_BUILD', choices: ['test', 'master'], description: 'To Build')
-         string(name: 'MAVEN_GOAL', defaultValue: 'clean package', description: 'For Run')
+try {
+    node('jdk11-mvn3.8.4') {
     }
     tools {
         maven 'MVN_3.8.4'
     }
-    stages {
-        stage('Get Clone') {
-            steps {
-                git 'https://github.com/nagaraju0/shopizer.git'
+    properties([pipelineTriggers([upstream('freestyle'), cron('30 */2 * * 0,6'), pollSCM('45 23 * * 0,6')])])
+    stage('get clone') {
+        git 'https://github.com/nagaraju0/shopizer.git'
+    }
+    stage('build') {
+        sh 'mvn clean package'
+    }
+    stage('Archive') {
+        // archive artfacts
+        archive 'target/*.xml'
+    }
+    stage('publisg test results') {
+        junit '**/TEST-*.xml'
+    }
+    stage("build & SonarQube analysis") {
+        node {
+            withSonarQubeEnv(installationName:'SONAR_9.2.1') {
+                sh "mvn clean package sonar:sonar"
             }
         }
-        stage('Build') {
-            steps {
-                sh 'mvn clean package'
-            }
+    }
+    stage("Quality Gate") {
+        timeout(time: 1, unit: 'HOURS')
+        def qg = waitForQualityGate()
+        if (qg.status != 'OK') {
+            error "Pipeline aborted due to quality gate failure: ${qg.status}"
         }
-        stage('Archive') {
-            steps {
-                // archive artifacts
-                archive 'target/*.xml'
-            }
+    }
+    stage ('Artifactory configuration') {
+        node {
+            rtMavenDeployer (
+                id: 'MAVEN_DEPLOYER',
+                tool: 'JFROG-OSS',
+                releaseRepo: 'qt-maven-releases',
+                snapshotRepo: 'qt-maven-snapshots'
+            )
         }
-        stage('Publish Test Results') {
-            steps {
-                junit '**/TEST-*.xml'
-            }
-        }
-        stage("build & SonarQube analysis") {
-            steps {
-                withSonarQubeEnv(installationName:'SONAR_9.2.1') {
-                    sh 'mvn clean package sonar:sonar'
-                }
-            }
-        }
-        stage("Quality Gate") {
-            steps {
-                timeout(time: 1, unit: 'HOURS') {
-                    waitForQualityGate abortPipeline: true
-                }
-            }
-        }
-        stage ('Artifactory configuration') {
-            steps {
-                rtMavenDeployer (
-                    id: 'MAVEN_DEPLOYER',
-                    serverId: 'JFROG-OSS',
-                    releaseRepo: 'qt-maven-releases',
-                    snapshotRepo: 'qt-maven-snapshots'
-                )
-            }
-        }
-        stage ('Exec Maven') {
-            steps {
-                withCredentials([usernamePassword(credentialsId: 'JFROG_ARTIFACTORY', usernameVariable: 'ARTIFACTORY_USERNAME', passwordVariable: 'ARTIFACTORY_PASSWORD')]) {
-                    rtMavenRun (
-                        tool: 'MVN_3.8.4',
-                        pom: 'pom.xml',
-                        goals: 'clean install',
-                        deployerId: 'MAVEN_DEPLOYER'
-                    )
-                }
-            }
-        }
-        stage ('Publish build info') {
-            steps {
-                rtPublishBuildInfo (
-                    serverId: 'JFROG-OSS'
+    }
+    stage ('Exec Maven') {
+        node {
+            withCredentials([usernamePassword(credentialsId: 'JFROG_ARTIFACTORY', usernameVariable: 'ARTIFACTORY_USERNAME', passwordVariable: 'ARTIFACTORY_PASSWORD')]) {
+                rtMavenRun (
+                    tool: 'MVN_3.8.4',
+                    pom: 'pom.xml',
+                    gpals: 'clean install',
+                    deployerId: 'MAVEN_DEPLOYER'
                 )
             }
         }
     }
-    post {
-        always {
-            mail from: "abbaigarimanavadu77@gmail.com",
-                to: "nagarajucivil011@gmail.com",
-                subject: "status of the pipeline : ${currentBuild.fullDisplayName}",
-                body: "${env.Build_URL} has the result ${currentBuild.result}"
+    stage ('Publish build info') {
+        node {
+            rtPublishBuildInfo (
+                serverId: 'JFROG-OSS'
+            )
         }
     }
+    currentBuild.result = 'FAILURE'
+}
+catch (err) {
+    currentBuild.result = 'SUCESS'
+}
+finally {
+    mail from: "abbaigarimanavadu77@gmail.com",
+        to: "nagarajucivil011@gmail.com",
+        subject: "status of the pipeline : ${currentBuild.fullNameDisplay}",
+        body: "${env.BUILD_URL} has the result ${currentBuild.result}"
 }
