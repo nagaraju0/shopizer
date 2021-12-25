@@ -1,24 +1,23 @@
 pipeline {
     agent { label 'jdk11-mvn3.8.4' }
     triggers {
-        upstream(upstreamProjects: 'freestyle', threshold: hudson.model.Result.SUCCESS)
-        cron('30 */2 * * 0,6') 
-        pollSCM('45 23 * * 0,6')
+        cron('30 */4 * * 1-5')
+        pollSCM('30 11 * * 1-5')
     }
-     parameters {
-         choice(name: 'BRANCH_TO_BUILD', choices: ['test', 'master'], description: 'To Build')
-         string(name: 'MAVEN_GOAL', defaultValue: 'clean package', description: 'For Run')
+    parameters {
+        choice(name: 'BRANCH_TO_BUILD', choices: ['onedec25', 'master', 'test'], description: 'To Build')
+        string(name: 'MAVEN_GOAL', defaultValue: 'clean package', description: 'For Build')
     }
-    tools {
+    tool {
         maven 'MVN_3.8.4'
     }
     stages {
-        stage('Get Clone') {
+        stage('get clone code') {
             steps {
                 git 'https://github.com/nagaraju0/shopizer.git'
             }
         }
-        stage('Build') {
+        stage('To Build') {
             steps {
                 sh 'mvn clean package'
             }
@@ -26,17 +25,17 @@ pipeline {
         stage('Archive') {
             steps {
                 // archive artifacts
-                archive 'target/*.xml'
+                archive 'target/*.jar'
             }
         }
-        stage('Publish Test Results') {
+        stage('Publish Build Result') {
             steps {
-                junit '**/TEST-*.xml'
+                junit 'target/surefire-reports/*.xml'
             }
         }
         stage("build & SonarQube analysis") {
             steps {
-                withSonarQubeEnv(installationName:'SONAR_9.2.1') {
+                withSonarQubeEnv(installationName'SONAR_9.2.1') {
                     sh 'mvn clean package sonar:sonar'
                 }
             }
@@ -48,42 +47,42 @@ pipeline {
                 }
             }
         }
-        stage ('Artifactory configuration') {
+        stage('artifacory configuration') {
             steps {
                 rtMavenDeployer (
-                    id: 'MAVEN_DEPLOYER',
-                    serverId: 'JFROG-OSS',
-                    releaseRepo: 'qt-maven-releases',
-                    snapshotRepo: 'qt-maven-snapshots'
+                    id:'MAVEN_DEPLOYER',
+                    serverId:'JFROG-OSS',
+                    releaseRepo:'qt-maven-releases',
+                    snapshotRepo:'qt-maven-snapshots'
                 )
             }
         }
-        stage ('Exec Maven') {
+        stage('Exec maven') {
             steps {
-                withCredentials([usernamePassword(credentialsId: 'JFROG_ARTIFACTORY', usernameVariable: 'ARTIFACTORY_USERNAME', passwordVariable: 'ARTIFACTORY_PASSWORD')]) {
+                withCredentials([usernamePassword(credentialsId: 'JFROG_ARTIFACTROY', usernameVariable: 'ARTIFACTORY_USERNAME', passwordVariable: 'ARTIFACTORY_PASSWORD')]) {
                     rtMavenRun (
-                        tool: 'MVN_3.8.4',
-                        pom: 'pom.xml',
-                        goals: 'clean install',
-                        deployerId: 'MAVEN_DEPLOYER'
+                        tool:'MVN_3.8.4',
+                        pom:'pom.xml',
+                        goals:'clean install',
+                        deployerId:'MAVEN_DEPLOYER'
+
                     )
-                }
+                }      
             }
         }
-        stage ('Publish build info') {
+        stage('publish Build Info') {
             steps {
                 rtPublishBuildInfo (
                     serverId: 'JFROG-OSS'
                 )
             }
         }
-    }
-    post {
-        always {
-            mail from: "abbaigarimanavadu77@gmail.com",
-                to: "nagarajucivil011@gmail.com",
-                subject: "status of the pipeline : ${currentBuild.fullDisplayName}",
-                body: "${env.Build_URL} has the result ${currentBuild.result}"
+        post {
+            always {
+                cleanws()
+            }
         }
     }
 }
+
+
