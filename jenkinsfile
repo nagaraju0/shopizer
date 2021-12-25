@@ -8,7 +8,7 @@ pipeline {
         choice(name: 'BRANCH_TO_BUILD', choices: ['onedec25', 'master', 'test'], description: 'To Build')
         string(name: 'MAVEN_GOAL', defaultValue: 'clean package', description: 'For Build')
     }
-    tool {
+    tools {
         maven 'MVN_3.8.4'
     }
     stages {
